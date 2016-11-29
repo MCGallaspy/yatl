@@ -77,21 +77,22 @@ constexpr int linearize(head&& i, tail&&... t) {
 // Cuts down on some visual clutter in the definitions.
 template <typename>
 struct get_value_type;
-  
+
+// same
 template <typename>
 struct get_dims;
 
-// An expression wraps non-copyable objects (for us, tensors) to give us (comparatively) cheap copy semantics.
+// An expression wraps non-copyable objects (for us, tensors) to give us cheap copy semantics.
+// However we must be careful to avoid keeping around expressions containing temporaries -- it will result in a
+// dangling reference. In general this means that we should *avoid* using expressions except where they are
+// necessary, and instead prefer to refer to hold objects of base_type. 
 template <typename base_type>
 class expression {
 private:
   const base_type& m_base;
   
 public:
-  expression(const base_type& base) : m_base(base) {}
-  expression(const expression& copy) : m_base(copy.m_base) {}
-  expression& operator=(const expression& copy) = delete;
-  expression() = delete;
+  expression() : m_base(static_cast<const base_type&>(*this)) {}
   
   using value_type = typename get_value_type<base_type>::type;
   
@@ -100,28 +101,29 @@ public:
     return m_base.get(inds...);
   }
   
+  operator const base_type& () const {
+    return m_base;
+  }
 };
 
 // value_type_ : int, double, etc. Should support arithmetic.
 // dims        : the dimensionality, e.g. 3 for Euclidean space
 // rank        : 0 is a scalar, 1 is a vector, 2 a matrix, etc.
 template <typename value_type_, int dims = 3, int rank = 1>
-class tensor : expression<tensor<value_type_, dims, rank>> {
+class tensor : public expression<tensor<value_type_, dims, rank>> {
   // Use an array instead of a vector, becuase heap allocation is the enemy of optimization.
   std::array<value_type_, pow(dims, rank)> m_coords;
 
 public:
   // Just to prove that we're not copying anywhere!
   tensor(const tensor& copy) = delete;
-  tensor(tensor&& copy) = delete;
   
   using value_type = value_type_;
   static constexpr int dimensionality = dims;
   
   tensor() = delete;
   // Initializes every element by copying proto
-  tensor(const value_type& proto) : expression<tensor<value_type_, dims, rank>>(*this) {
-    printf("making a tensor\n");
+  tensor(const value_type& proto) {
     for (auto& elem : m_coords) {
       elem = proto;
     }
@@ -155,13 +157,6 @@ struct get_dims<tensor<value_type, dims, rank>> {
   static constexpr int value = dims;
 };
 
-// ******************************************************************************* 
-// The next classes, swizzled and binary_op, are examples of expression templates.
-// Initially I had something wikipedia-esque involving the curiously recurring template pattern (CRTP), but I found
-// that it doesn't add anything... I can achieve minimal code repitition and still get lazy evaluation without it.
-// I wonder if I am missing the point somehow? Needs further investigation.
-// *******************************************************************************
-
 // Only (conceptually) defined for vectors. I'm not sure how swizzling would generalize to higher rank tensors.
 template <typename expr_type>
 class swizzled : public expression<swizzled<expr_type>> {
@@ -175,14 +170,11 @@ private:
   // optimizable code.
   std::array<int, dims> m_from_to;
   
-  using base_expr_type = expression<swizzled<expr_type>>;
-  
 public:
   using value_type = typename get_value_type<swizzled<expr_type>>::type;
 
   template <typename pair_type>
-  swizzled(const expr_type vec, pair_type&& pairs) : base_expr_type(*this), m_vec(vec) {
-    printf("Making a swizzle\n");
+  swizzled(const expr_type vec, pair_type&& pairs) : m_vec(vec) {
     // First make it the identity map
     for (int i=0; i<dims; ++i) {
       m_from_to[i] = i;
@@ -209,23 +201,21 @@ struct get_dims<swizzled<inner>> {
 };
 
 // Represents an arbitrary binary operation.
-// Probably more thought should be given to taking op_t by rvalue reference
+// Here for the first time we encounter an issue with dangling references.
+// binary_ops can be nested, but one must be careful that an honest binary_op is copied and not the
+// base class expression<binary_op<...>>, otherwise there will be issues.
 template <typename left_t, typename right_t, typename op_t>
 class binary_op : public expression<binary_op<left_t, right_t, op_t>> {
 private:
   const left_t m_left;
   const right_t m_right;
   const op_t m_op;
-  
-  using base_expr_type = expression<binary_op<left_t, right_t, op_t>>;
 
 public:
   using value_type = typename get_value_type<binary_op<left_t, right_t, op_t>>::type;
   
   binary_op(const left_t left, const right_t right, const op_t& op) :
-    base_expr_type(*this), m_left(left), m_right(right), m_op(op) {
-        printf("Making a binary op\n");
-    }
+    m_left(left), m_right(right), m_op(op) {}
 
   // Again we don't define a non-const version because it permits weird assignments.
   // What should be the meaning of assigning to an expression? In cases where an expression
@@ -233,7 +223,6 @@ public:
   // we would like to make this explicit.
   template <typename... index_types>
   const auto get(index_types&&... inds) const {
-    printf("get`ing from a binary_op\n");
     return m_op(m_left.get(inds...), m_right.get(inds...));
   }
 };
@@ -241,10 +230,27 @@ public:
 template <typename value_type, int dims = 3>
 using vector = tensor<value_type, 3, 1>;
 
+// Promoter eases the dangling reference problem... basically it can be used to say that an expression should be
+// "promoted" to the referenced "inner" type if the inner type supports copy semantics.
+// That limits the number of pathological expressions it is possible to create.
+// However you're still in trouble if you create a temporary tensor.
+template <typename inner>
+struct promoter;
+
+template <typename inner>
+using promoter_t = typename promoter<inner>::type;
+
+template <typename inner>
+struct promoter<expression<inner>> {
+    using type = std::conditional_t<std::is_copy_constructible<inner>::value, inner, expression<inner>>;
+};
+
+
+//
 template <typename expr_type, typename pairs_type>
-swizzled<expression<expr_type>>
-make_swizzled(expression<expr_type> vec, pairs_type&& pairs) {
-  using swizzled_type = swizzled<expression<expr_type>>;
+auto make_swizzled(expression<expr_type> vec, pairs_type&& pairs) {
+  using inner = promoter_t<expression<expr_type>>;
+  using swizzled_type = swizzled<inner>;
   return swizzled_type(vec, std::forward<pairs_type>(pairs));
 }
 
@@ -257,10 +263,13 @@ auto operator+(expression<left_t> left, expression<right_t> right) {
     return lft_v + rgt_v;
   };
 
-  using binary_op_type = binary_op<expression<left_t>, expression<right_t>, decltype(plus)>;
+  using left_res_t = promoter_t<expression<left_t>>;
+  using right_res_t = promoter_t<expression<right_t>>;
+  using binary_op_type = binary_op<left_res_t, right_res_t, decltype(plus)>;
   return binary_op_type(left, right, plus);
 }
 
+// Finally some helper template definitions
 template <typename left, typename right, typename op>
 class get_value_type<binary_op<left, right, op>> {
   using left_vt  = typename left::value_type;
@@ -270,16 +279,19 @@ public:
   using type = std::result_of_t<op(left_vt, right_vt)>;
 };
 
+// ...
 template <typename inner>
 struct get_value_type<expression<inner>> {
   using type = typename get_value_type<inner>::type;
 };
 
+// ...
 template <typename expr_type>
 struct get_value_type<swizzled<expr_type>> {
   using type = typename expr_type::value_type;
 };
 
+// ... and we're done.
 template <typename value_type_, int dims, int rank>
 struct get_value_type<tensor<value_type_, dims, rank>> {
   using type = value_type_;  
@@ -290,7 +302,6 @@ struct get_value_type<tensor<value_type_, dims, rank>> {
 
 int main() {
   // The basics
-  
   cool::vector<int> my_3vec(42);
   printf("%d\n", my_3vec.get(0));
   
@@ -305,29 +316,33 @@ int main() {
   auto bar = cool::make_swizzled(my_3vec, pairs);
   printf("%d\n", bar.get(2));
   
+  // And you can swizzle swizzled stuff.
   auto baz = cool::make_swizzled(bar, pairs);
   printf("%d\n", baz.get(0));
-  // With a swizzled vector, it seems weird to permit assignment as in the two examples below.
+  
+  // With a swizzled vector, it seems weird to permit assignment as in the example below.
   // bar.get(1) = 3;
   // printf("%d", bar.get(2)); 
 
-  
   // Just for grins
   cool::tensor<double, 3, 2> my_matrix(1.2);
   printf("%f\n", my_matrix.get(1, 1));
   
-  // Scalar types just work.
+  // Scalar types just work, but there's sort of a weird syntax since the dimensionality doesn't matter.
   cool::tensor<int, 3, 0> scalar(99);
   printf("%d\n", scalar.get());
   
-  // Expressions can be chained... but in the final analysis my knowledge of assembly is too
-  // weak to determine whether this is optimal.
+  // Expressions can be chained arbitrarily, as is done implicitly below.
   cool::vector<int, 3> another_3vec(9);
   auto result = my_3vec + another_3vec + bar;
-  auto result0 = my_3vec + another_3vec;
-  auto result1 = result0 + bar;
   for (int i=0; i<3; ++i) {
-    printf("%d\n", result1.get(i));
+    printf("%d\n", result.get(i));
   }
-  printf("%d", result.get(0));
+  
+  /*
+  // Temporary tensors are a problem, though... leaves a dangling reference.
+  // Unsure how to deal with this issue.
+  auto bad = my_3vec + cool::vector<int, 3>(0);
+  printf("%d\n", bad.get(1));
+  */
 }
