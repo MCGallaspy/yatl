@@ -1,20 +1,17 @@
 /*
 Hi Tor, I kept thinking about vectors, swizzling, and more general tensors.
-I finally got the time to realize these ideas a little but this past turkey slaughter festival.
+I finally got the time to realize these ideas a little bit this past turkey slaughter festival.
 Here it is, interested to hear your thoughts. I have annotated the source.
 
 There are three (and a half) ideas to consider here:
 
-1a. Generalized tensors, an idea which is not fully fleshed out yet.
+1.  Generalized tensors, an idea which is not fully fleshed out yet.
     Vectors and matrices are special cases of tensors with ranks 1 and 2 respectively. [*]
     I access elements using tensor::get instead of ::operator[], since ::operator[]
     is constrained to take one parameter. I want to be able to access elements with
     syntax like my_vector.get(1) or my_matrix.get(3, 4) which isn't possible with
     operator[]. This also has the nice benefit that scalar types (tensors of rank 0)
     can be accessed with ::get(), for which operator[] provides no analog.
-    
-1b. For element access one might also want my_matrix.get(3) to return a tensor
-    of one rank lower, i.e. a vector... this idea is not explored yet.
 
 2.  Swizzling: don't copy a vector to swizzle it. In analogy to std::string_view,
     the data is already there, so just provide a wrapper to access it. For swizzling
@@ -30,14 +27,15 @@ There are three (and a half) ideas to consider here:
     is simple: use lazy evaluation to avoid copying temporary values in complex expressions.
     In the examples below a swizzled vector doesn't copy and transform its underlying vector,
     instead it provides a recipe for transforming the vector which is evaluated only when you
-    access its elements. In essence, we tradeoff temporary copies for pointer dereferencing.
+    access its elements. In essence, we trade off temporary copies for pointer dereferencing.
     The same idea can be applied to arbitrary operations -- below I implement operator+ for
     tensors as a proof of concept.
 
-[*] The "dimensionality" of a tensor is distinct from it's rank... I don't think this is the
-"real math" term for it and I'm too lazy to look it up, but the dimensionality as I use the
-terms represents the # of dimensions of the underlying vector space, e.g. tensors over
-a Euclidean plane would have dimensionality 2 and over a space they would have dimensionality 3.
+[*] Actually tensors and matrices are not exactly the same thing, and some libraries like tensorflow and Eigen's
+    unsupported tensor module do not quite make the distinction.
+    For instance a "non-square" matrix doesn't really correspond to a geometric tensor -- there isn't an elementary
+    notion of a tensor whose indices have different dimensionalities.
+    Basically there is a difference between, say, a rank-2 tensor and a vector of vectors.
 */
 
 #include <array>
