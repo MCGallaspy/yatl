@@ -81,9 +81,10 @@ template <typename>
 struct get_dims;
 
 // An expression wraps non-copyable objects (for us, tensors) to give us cheap copy semantics.
-// However we must be careful to avoid keeping around expressions containing temporaries -- it will result in a
-// dangling reference. In general this means that we should *avoid* using expressions except where they are
-// necessary, and instead prefer to refer to hold objects of base_type. 
+// However we must be careful to avoid keeping around "naked" expressions containing temporaries --
+// it will result in a dangling reference.
+// In general this means that we should *avoid* using "naked" expressions as template parameters except where they
+// are necessary (more on that below) and instead cast expressions to their base_type for use as template params. 
 template <typename base_type>
 class expression {
 private:
@@ -105,7 +106,7 @@ public:
 };
 
 // value_type_ : int, double, etc. Should support arithmetic.
-// dims        : the dimensionality, e.g. 3 for Euclidean space
+// dims        : the dimensionality, e.g. 3 for normal Euclidean space
 // rank        : 0 is a scalar, 1 is a vector, 2 a matrix, etc.
 template <typename value_type_, int dims = 3, int rank = 1>
 class tensor : public expression<tensor<value_type_, dims, rank>> {
@@ -183,9 +184,6 @@ public:
       m_from_to[pair.first] = pair.second;
     }
   }
-  
-  swizzled(const swizzled&) = delete;
-  swizzled(swizzled&&) = default;
 
   // We don't define a non-const version because it permits weird assignments.
   const auto get(int index) const {
@@ -244,7 +242,9 @@ struct promoter<expression<inner>> {
 };
 
 
-//
+// This and operator+ below cut out some boilerplate, but in order to accept arbitrary expressions we open
+// ourselves up to the dangling reference danger of "naked" expressions.
+// In order to avoid it, we'll "promote" our parameters where possible.
 template <typename expr_type, typename pairs_type>
 auto make_swizzled(expression<expr_type> vec, pairs_type&& pairs) {
   using inner = promoter_t<expression<expr_type>>;
