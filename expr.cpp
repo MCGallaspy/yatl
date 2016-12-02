@@ -106,7 +106,7 @@ struct nested_init_list<1, value_type> {
 // A special case, not reachable by recursion but necessary nonetheless
 template <typename value_type>
 struct nested_init_list<0, value_type> {
-  using type = value_type;
+  using type = std::initializer_list<value_type>;
 };
 
 template <int rank, typename value_type>
@@ -157,7 +157,17 @@ struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
     }
     return arr;
   }
-  // {1, 2, 3, 4}
+};
+
+template <typename value_type, int dims>
+struct get_coordinate_sequence<nested_init_list<0, value_type>, dims> {
+  static
+  auto
+  generate(nested_init_list_t<0, value_type> list) {
+    std::array<std::pair<std::tuple<int>, value_type>, 1> arr;
+    arr[0] = std::make_pair(std::make_tuple(0), *list.begin());
+    return arr;
+  }
 };
 
 } // anonymous inner namespace
@@ -427,8 +437,11 @@ int main() {
   printf("%f\n", my_matrix.get(1, 1));
   
   // Scalar types just work, but there's sort of a weird syntax since the dimensionality doesn't matter.
-  // cool::tensor<int, 3, 0> scalar(99);
-  // printf("%d\n", scalar.get());
+  cool::tensor<int, 3, 0> scalar(99);
+  printf("%d\n", scalar.get());
+  
+  cool::tensor<double, 0, 0> scalar2{2.2};
+  printf("%f\n", scalar2.get());
   
   // Expressions can be chained arbitrarily, as is done implicitly below.
   cool::vector<int, 3> another_3vec(9);
@@ -457,5 +470,13 @@ int main() {
            matrix_init_tester.get(0, i),
            matrix_init_tester.get(1, i),
            matrix_init_tester.get(2, i));
+  }
+  
+  cool::tensor<double, 2, 2> matrix_init_tester2{{5.2, 6},
+                                                 {7  , 8}};
+  for (int i=0; i<2; ++i) {
+    printf("%f, %f\n",
+           matrix_init_tester2.get(0, i),
+           matrix_init_tester2.get(1, i));
   }
 }
