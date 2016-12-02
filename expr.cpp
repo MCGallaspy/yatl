@@ -39,8 +39,9 @@ There are three (and a half) ideas to consider here:
 */
 
 #include <array>
+#include <initializer_list>
+#include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 
 #include <stdio.h>
@@ -67,6 +68,97 @@ template <int dims, typename head, typename... tail>
 constexpr int linearize(head&& i, tail&&... t) {
   return i + (dims * linearize<dims>(t...));
 }
+
+template <int dims, typename tuple_, typename seq>
+struct tuple_linearizer_helper;
+
+template <int dims, typename... types, int... ns>
+struct tuple_linearizer_helper<dims, std::tuple<types...>, std::integer_sequence<int, ns...>> {
+  static int value(const std::tuple<types...>& t) {
+    return linearize<dims>(std::get<ns>(t)...);
+  }
+};
+
+template <int dims, typename tuple_>
+struct tuple_linearizer;
+
+template <int dims, typename... types>
+struct tuple_linearizer<dims, std::tuple<types...>> {
+  static int value(const std::tuple<types...>& t) {
+    return tuple_linearizer_helper<dims,
+                                   std::tuple<types...>,
+                                   std::make_integer_sequence<int, sizeof...(types)>>::value(t);
+  }
+};
+
+template <int rank, typename value_type>
+struct nested_init_list {
+  using type = std::initializer_list<
+    typename nested_init_list<rank - 1, value_type>::type
+  >;
+};
+
+template <typename value_type>
+struct nested_init_list<1, value_type> {
+  using type = std::initializer_list<value_type>;
+};
+
+// A special case, not reachable by recursion but necessary nonetheless
+template <typename value_type>
+struct nested_init_list<0, value_type> {
+  using type = value_type;
+};
+
+template <int rank, typename value_type>
+using nested_init_list_t = typename nested_init_list<rank, value_type>::type;
+
+template <typename nested_list, int dims>
+struct get_coordinate_sequence;
+
+template <int rank, typename value_type, int dims>
+struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
+    
+};
+
+template <typename value_type, int dims>
+struct get_coordinate_sequence<nested_init_list<2, value_type>, dims> {
+  static
+  std::array<std::pair<std::tuple<int, int>, value_type>, pow(dims, 2)>
+  generate(nested_init_list_t<2, value_type> list) {
+    std::array<std::pair<std::tuple<int, int>, value_type>, pow(dims, 2)> arr;
+    int i = 0;
+    for (const auto& sublist : list) {
+      const auto subseq = get_coordinate_sequence<nested_init_list<1, value_type>, dims>::generate(sublist);
+      int j = 0;
+      for (const auto& elm : subseq) {
+        arr[linearize<dims>(i, j)] = std::make_pair(std::make_tuple(std::get<0>(elm.first), i), elm.second);
+        ++j;
+      }
+      ++i;
+    }
+    return arr;
+  }
+  // { {1, 2},
+  //   {3, 4} }
+  // generates: (0, 0), (1, 0),
+  //            (0, 1), (1, 1)
+};
+
+template <typename value_type, int dims>
+struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
+  static
+  std::array<std::pair<std::tuple<int>, value_type>, dims>
+  generate(nested_init_list_t<1, value_type> list) {
+    std::array<std::pair<std::tuple<int>, value_type>, dims> arr;
+    int i = 0;
+    for (const auto& elm : list) {
+      arr[i] = std::make_pair(std::make_tuple(i), elm);
+      ++i;
+    }
+    return arr;
+  }
+  // {1, 2, 3, 4}
+};
 
 } // anonymous inner namespace
 
@@ -116,18 +208,26 @@ class tensor : public expression<tensor<value_type_, dims, rank>> {
 public:
   // Just to prove that we're not copying anywhere!
   tensor(const tensor& copy) = delete;
+  tensor() = delete;
   
   using value_type = value_type_;
   static constexpr int dimensionality = dims;
-  
-  tensor() = delete;
+
   // Initializes every element by copying proto
   tensor(const value_type& proto) {
     for (auto& elem : m_coords) {
       elem = proto;
     }
   }
-  
+
+  tensor(nested_init_list_t<rank, value_type> list) {
+    const auto seq = get_coordinate_sequence<nested_init_list<rank, value_type>, dims>::generate(list);
+    for (const auto& elm : seq) {
+      const int index = tuple_linearizer<dims, decltype(elm.first)>::value(elm.first);
+      m_coords[index] = elm.second;
+    }
+  }
+
   // The non-const accessor is hackily defined in terms of the const operator by casting
   // away the const-ness. See const version of explanation.
   template <typename... ind_ts>
@@ -327,8 +427,8 @@ int main() {
   printf("%f\n", my_matrix.get(1, 1));
   
   // Scalar types just work, but there's sort of a weird syntax since the dimensionality doesn't matter.
-  cool::tensor<int, 3, 0> scalar(99);
-  printf("%d\n", scalar.get());
+  // cool::tensor<int, 3, 0> scalar(99);
+  // printf("%d\n", scalar.get());
   
   // Expressions can be chained arbitrarily, as is done implicitly below.
   cool::vector<int, 3> another_3vec(9);
@@ -343,4 +443,19 @@ int main() {
   auto bad = my_3vec + cool::vector<int, 3>(0);
   printf("%d\n", bad.get(1));
   */
+  
+  cool::vector<int, 3> vec_init_tester{5, 6, 7};
+  for (int i=0; i<3; ++i) {
+    printf("%d\n", vec_init_tester.get(i));
+  }
+  
+  cool::tensor<int, 3, 2> matrix_init_tester{{5, 6, 7},
+                                             {7, 8, 9},
+                                             {3, 4, 1}};
+  for (int i=0; i<3; ++i) {
+    printf("%d, %d, %d\n",
+           matrix_init_tester.get(0, i),
+           matrix_init_tester.get(1, i),
+           matrix_init_tester.get(2, i));
+  }
 }
