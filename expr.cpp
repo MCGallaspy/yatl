@@ -112,7 +112,7 @@ struct nested_init_list<0, value_type> {
 template <int rank, typename value_type>
 using nested_init_list_t = typename nested_init_list<rank, value_type>::type;
 
-template <typename nested_list, int dims>
+template <typename nested_list, int dims, typename = void>
 struct get_coordinate_sequence;
 
 template <typename value_type, int dims, int rank>
@@ -128,7 +128,7 @@ struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
       for (auto& elm : subseq) {
         constexpr int base = pow(dims, rank - 1);
         const int index = base * i + j;
-        arr[index] = elm;
+        arr[index] = std::move(elm);
         ++j;
       }
       ++i;
@@ -139,12 +139,11 @@ struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
 
 template <typename value_type, int dims>
 struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
-  static
-  auto
-  generate(nested_init_list_t<1, value_type> list) {
+  static auto
+  generate(std::initializer_list<value_type> list) {
     std::array<value_type, dims> arr;
     int i = 0;
-    for (auto& elm : list) {
+    for (const auto& elm : list) {
       arr[i] = elm;
       ++i;
     }
@@ -181,20 +180,20 @@ struct get_dims;
 template <typename base_type>
 class expression {
 private:
-  const base_type& m_base;
+  const base_type* m_base;
   
 public:
-  expression() : m_base(static_cast<const base_type&>(*this)) {}
+  expression() : m_base(static_cast<const base_type*>(this)) {}
   
   using value_type = typename get_value_type<base_type>::type;
   
   template <typename... ind_ts>
   const value_type get(ind_ts&&... inds) const {
-    return m_base.get(inds...);
+    return m_base->get(inds...);
   }
   
   operator const base_type& () const {
-    return m_base;
+    return *m_base;
   }
 };
 
@@ -209,10 +208,11 @@ class tensor : public expression<tensor<value_type_, dims, rank>> {
 public:
   // Just to prove that we're not copying anywhere!
   tensor(const tensor& copy) = delete;
+  tensor& operator=(const tensor& rhs) = delete;
   tensor() = default;
   tensor(tensor&& rhs) = default;
   tensor& operator=(tensor&& rhs) = default;
-
+  
   using value_type = value_type_;
   static constexpr int dimensionality = dims;
 
@@ -335,7 +335,7 @@ public:
 };
 
 template <typename value_type, int dims = 3>
-using vector = tensor<value_type, 3, 1>;
+using vector = tensor<value_type, dims, 1>;
 
 // Promoter eases the dangling reference problem... basically it can be used to say that an expression should be
 // "promoted" to the referenced "inner" type if the inner type supports copy semantics.
@@ -368,7 +368,7 @@ auto operator+(expression<left_t> left, expression<right_t> right) {
   using left_vt = typename get_value_type<left_t>::type;
   using right_vt = typename get_value_type<right_t>::type;
   
-  constexpr auto plus = [](const left_vt& lft_v, const right_vt& rgt_v) {
+  auto plus = [](const left_vt& lft_v, const right_vt& rgt_v) {
     return lft_v + rgt_v;
   };
 
@@ -528,4 +528,12 @@ int main() {
     printf("%d, ", elm);
   }
   printf("\n");
+  
+  cool::vector<int, 3> a = {1, 2, 3};
+  cool::vector<cool::vector<int, 3>, 2> rect;
+  rect.get(0) = std::move(a);
+  rect.get(1) = cool::vector<int, 3>{4, 5, 6};
+  for (const auto& col : rect) {
+    printf("%d, %d, %d\n", col.get(0), col.get(1), col.get(2));
+  }
 }
