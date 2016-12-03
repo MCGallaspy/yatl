@@ -112,47 +112,58 @@ struct nested_init_list<0, value_type> {
 template <int rank, typename value_type>
 using nested_init_list_t = typename nested_init_list<rank, value_type>::type;
 
+template <int n>
+struct coordinate_n_tuple {
+  using type = decltype(std::tuple_cat(
+    std::declval<std::tuple<int>>(),
+    std::declval<typename coordinate_n_tuple<n-1>::type>()
+  ));
+};
+
+template <>
+struct coordinate_n_tuple<1> {
+  using type = std::tuple<int>;
+};
+
+template <int n>
+using coordinate_n_tuple_t = typename coordinate_n_tuple<n>::type;
+
 template <typename nested_list, int dims>
 struct get_coordinate_sequence;
 
-template <int rank, typename value_type, int dims>
+template <typename value_type, int dims, int rank>
 struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
-    
-};
-
-template <typename value_type, int dims>
-struct get_coordinate_sequence<nested_init_list<2, value_type>, dims> {
   static
-  std::array<std::pair<std::tuple<int, int>, value_type>, pow(dims, 2)>
-  generate(nested_init_list_t<2, value_type> list) {
-    std::array<std::pair<std::tuple<int, int>, value_type>, pow(dims, 2)> arr;
+  auto
+  generate(nested_init_list_t<rank, value_type> list) {
+    std::array<std::pair<coordinate_n_tuple_t<rank>, value_type>, pow(dims, rank)> arr;
     int i = 0;
-    for (const auto& sublist : list) {
-      const auto subseq = get_coordinate_sequence<nested_init_list<1, value_type>, dims>::generate(sublist);
-      int j = 0;
+    for (auto& sublist : list) {
+      auto subseq = get_coordinate_sequence<nested_init_list<rank - 1, value_type>, dims>::generate(sublist);
       for (const auto& elm : subseq) {
-        arr[linearize<dims>(i, j)] = std::make_pair(std::make_tuple(std::get<0>(elm.first), i), elm.second);
-        ++j;
+        using linearizer_t = tuple_linearizer<dims, coordinate_n_tuple_t<rank>>;
+        const auto params = std::tuple_cat(std::make_tuple(i), elm.first);
+        const int index = linearizer_t::value(params);
+        auto rhs{std::make_pair(std::tuple_cat(elm.first, std::make_tuple(i)), std::move(elm.second))};
+        arr[index].swap(rhs);
       }
       ++i;
     }
     return arr;
   }
-  // { {1, 2},
-  //   {3, 4} }
-  // generates: (0, 0), (1, 0),
-  //            (0, 1), (1, 1)
 };
 
 template <typename value_type, int dims>
 struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
   static
-  std::array<std::pair<std::tuple<int>, value_type>, dims>
+  auto
   generate(nested_init_list_t<1, value_type> list) {
     std::array<std::pair<std::tuple<int>, value_type>, dims> arr;
     int i = 0;
-    for (const auto& elm : list) {
-      arr[i] = std::make_pair(std::make_tuple(i), elm);
+    for (auto& elm : list) {
+      //auto rhs = std::make_pair(std::make_tuple(i), std::move(elm));
+      auto rhs = std::make_pair(std::make_tuple(i), elm);
+      arr[i].swap(rhs);
       ++i;
     }
     return arr;
@@ -165,7 +176,8 @@ struct get_coordinate_sequence<nested_init_list<0, value_type>, dims> {
   auto
   generate(nested_init_list_t<0, value_type> list) {
     std::array<std::pair<std::tuple<int>, value_type>, 1> arr;
-    arr[0] = std::make_pair(std::make_tuple(0), *list.begin());
+    auto rhs = std::make_pair(std::make_tuple(0), std::move(*list.begin()));
+    arr[0].swap(rhs);
     return arr;
   }
 };
@@ -218,8 +230,10 @@ class tensor : public expression<tensor<value_type_, dims, rank>> {
 public:
   // Just to prove that we're not copying anywhere!
   tensor(const tensor& copy) = delete;
-  tensor() = delete;
-  
+  tensor() = default;
+  tensor(tensor&& rhs) = default;
+  tensor& operator=(tensor&& rhs) = default;
+
   using value_type = value_type_;
   static constexpr int dimensionality = dims;
 
@@ -231,10 +245,10 @@ public:
   }
 
   tensor(nested_init_list_t<rank, value_type> list) {
-    const auto seq = get_coordinate_sequence<nested_init_list<rank, value_type>, dims>::generate(list);
-    for (const auto& elm : seq) {
+    const auto seq(get_coordinate_sequence<nested_init_list<rank, value_type>, dims>::generate(list));
+    for (auto& elm : seq) {
       const int index = tuple_linearizer<dims, decltype(elm.first)>::value(elm.first);
-      m_coords[index] = elm.second;
+      m_coords[index] = std::move(elm.second);
     }
   }
 
@@ -253,6 +267,19 @@ public:
     static_assert(sizeof...(ind_ts) == rank, "The number of indices must match the rank of the tensor.");
     auto index = linearize<dims>(inds...);
     return m_coords[index];
+  }
+  
+  auto begin() {
+    return m_coords.begin();
+  }
+  
+  auto end() {
+    return m_coords.end();
+  }
+  
+  friend void swap(tensor& lhs, tensor& rhs) {
+    using std::swap;
+    swap(lhs.m_coords, rhs.m_coords);
   }
 };
 
@@ -404,7 +431,7 @@ template <typename value_type_, int dims, int rank>
 struct get_value_type<tensor<value_type_, dims, rank>> {
   using type = value_type_;  
 };
-  
+
 } // namespace cool
 
 
@@ -479,4 +506,52 @@ int main() {
            matrix_init_tester2.get(0, i),
            matrix_init_tester2.get(1, i));
   }
+  
+  cool::tensor<char, 2, 3>
+    rank3_char_tensor
+    {
+      {
+        {'a', 'b'},
+        {'c', 'd'}
+      },
+      {
+        {'e', 'f'}, 
+        {'g', 'h'}
+      }
+    };
+  
+  for (const auto& elm : rank3_char_tensor) {
+    printf("%c, ", elm);
+  }
+  printf("\n");
+  
+  cool::tensor<int, 2, 4>
+    rank4_int_tensor
+    {
+      {
+        {
+          {15, 14},
+          {13, 12}
+        },
+        {
+          {11, 10}, 
+          { 9,  8}
+        }
+      },
+      {
+        {
+          { 7,  6},
+          { 5,  4}
+        },
+        {
+          { 3,  2}, 
+          { 1,  0}
+        }
+      }
+    };
+  
+  for (const auto& elm : rank4_int_tensor) {
+    printf("%d, ", elm);
+  }
+  printf("\n");
 }
