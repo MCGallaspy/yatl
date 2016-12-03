@@ -112,22 +112,6 @@ struct nested_init_list<0, value_type> {
 template <int rank, typename value_type>
 using nested_init_list_t = typename nested_init_list<rank, value_type>::type;
 
-template <int n>
-struct coordinate_n_tuple {
-  using type = decltype(std::tuple_cat(
-    std::declval<std::tuple<int>>(),
-    std::declval<typename coordinate_n_tuple<n-1>::type>()
-  ));
-};
-
-template <>
-struct coordinate_n_tuple<1> {
-  using type = std::tuple<int>;
-};
-
-template <int n>
-using coordinate_n_tuple_t = typename coordinate_n_tuple<n>::type;
-
 template <typename nested_list, int dims>
 struct get_coordinate_sequence;
 
@@ -136,16 +120,16 @@ struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
   static
   auto
   generate(nested_init_list_t<rank, value_type> list) {
-    std::array<std::pair<coordinate_n_tuple_t<rank>, value_type>, pow(dims, rank)> arr;
+    std::array<value_type, pow(dims, rank)> arr;
     int i = 0;
     for (auto& sublist : list) {
       auto subseq = get_coordinate_sequence<nested_init_list<rank - 1, value_type>, dims>::generate(sublist);
-      for (const auto& elm : subseq) {
-        using linearizer_t = tuple_linearizer<dims, coordinate_n_tuple_t<rank>>;
-        const auto params = std::tuple_cat(std::make_tuple(i), elm.first);
-        const int index = linearizer_t::value(params);
-        auto rhs{std::make_pair(std::tuple_cat(elm.first, std::make_tuple(i)), std::move(elm.second))};
-        arr[index].swap(rhs);
+      int j = 0;
+      for (auto& elm : subseq) {
+        constexpr int base = pow(dims, rank - 1);
+        const int index = base * i + j;
+        arr[index] = elm;
+        ++j;
       }
       ++i;
     }
@@ -158,12 +142,10 @@ struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
   static
   auto
   generate(nested_init_list_t<1, value_type> list) {
-    std::array<std::pair<std::tuple<int>, value_type>, dims> arr;
+    std::array<value_type, dims> arr;
     int i = 0;
     for (auto& elm : list) {
-      //auto rhs = std::make_pair(std::make_tuple(i), std::move(elm));
-      auto rhs = std::make_pair(std::make_tuple(i), elm);
-      arr[i].swap(rhs);
+      arr[i] = elm;
       ++i;
     }
     return arr;
@@ -175,10 +157,7 @@ struct get_coordinate_sequence<nested_init_list<0, value_type>, dims> {
   static
   auto
   generate(nested_init_list_t<0, value_type> list) {
-    std::array<std::pair<std::tuple<int>, value_type>, 1> arr;
-    auto rhs = std::make_pair(std::make_tuple(0), std::move(*list.begin()));
-    arr[0].swap(rhs);
-    return arr;
+    return std::array<value_type, 1>{*list.begin()};
   }
 };
 
@@ -244,13 +223,8 @@ public:
     }
   }
 
-  tensor(nested_init_list_t<rank, value_type> list) {
-    const auto seq(get_coordinate_sequence<nested_init_list<rank, value_type>, dims>::generate(list));
-    for (auto& elm : seq) {
-      const int index = tuple_linearizer<dims, decltype(elm.first)>::value(elm.first);
-      m_coords[index] = std::move(elm.second);
-    }
-  }
+  tensor(nested_init_list_t<rank, value_type> list) :
+    m_coords(get_coordinate_sequence<nested_init_list<rank, value_type>, dims>::generate(list)) {}
 
   // The non-const accessor is hackily defined in terms of the const operator by casting
   // away the const-ness. See const version of explanation.
