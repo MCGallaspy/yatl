@@ -156,15 +156,15 @@ public:
   // The non-const accessor is hackily defined in terms of the const operator by casting
   // away the const-ness. See const version of explanation.
   template <typename... ind_ts>
-  value_type& get(ind_ts&&... inds) {
+  value_type& operator()(ind_ts&&... inds) {
     using tensor_type = tensor<value_type, dims, rank>;
-    return const_cast<value_type&>(static_cast<const tensor_type&>(*this).get(inds...));
+    return const_cast<value_type&>(static_cast<const tensor_type&>(*this)(inds...));
   }
   
   // I don't really care about the types of indices.
   // The only thing that matters is the # of parameters, which are used to index into a flat array.
   template <typename... ind_ts>
-  const value_type& get(ind_ts&&... inds) const {
+  const value_type& operator()(ind_ts&&... inds) const {
     static_assert(sizeof...(ind_ts) == rank, "The number of indices must match the rank of the tensor.");
     auto index = linearize<dims>(inds...);
     return m_coords[index];

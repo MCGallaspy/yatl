@@ -9,7 +9,7 @@ There are three (and a half) ideas to consider here:
     Vectors and matrices are special cases of tensors with ranks 1 and 2 respectively. [*]
     I access elements using tensor::get instead of ::operator[], since ::operator[]
     is constrained to take one parameter. I want to be able to access elements with
-    syntax like my_vector.get(1) or my_matrix.get(3, 4) which isn't possible with
+    syntax like my_vector(1) or my_matrix(3, 4) which isn't possible with
     operator[]. This also has the nice benefit that scalar types (tensors of rank 0)
     can be accessed with ::get(), for which operator[] provides no analog.
 
@@ -78,8 +78,8 @@ public:
   }
 
   // We don't define a non-const version because it permits weird assignments.
-  const auto get(int index) const {
-    return m_vec.get(m_from_to[index]);
+  const auto operator()(int index) const {
+    return m_vec(m_from_to[index]);
   }
 };
 
@@ -110,8 +110,8 @@ public:
   // should be evaluated into a real tensor, i.e. a distinct (transformed) copy of its source,
   // we would like to make this explicit.
   template <typename... index_types>
-  const auto get(index_types&&... inds) const {
-    return m_op(m_left.get(inds...), m_right.get(inds...));
+  const auto operator()(index_types&&... inds) const {
+    return m_op(m_left(inds...), m_right(inds...));
   }
 };
 
@@ -183,55 +183,55 @@ using matrix = yatl::vector<yatl::vector<value_type, cols>, rows>;
 int main() {
   // The basics
   yatl::vector<int> my_3vec(42);
-  printf("%d\n", my_3vec.get(0));
+  printf("%d\n", my_3vec(0));
   
-  my_3vec.get(1) = 7;
-  printf("%d\n", my_3vec.get(1));
+  my_3vec(1) = 7;
+  printf("%d\n", my_3vec(1));
   
   // Can't assign to constant.
-  // expr.get(0) = 5;
+  // expr(0) = 5;
   
   // Maps index 2 into 1.
   std::array<std::pair<int, int>, 1> pairs{ std::make_pair(2, 1) };
   auto bar = yatl::make_swizzled(my_3vec, pairs);
-  printf("%d\n", bar.get(2));
+  printf("%d\n", bar(2));
   
   // And you can swizzle swizzled stuff.
   auto baz = yatl::make_swizzled(bar, pairs);
-  printf("%d\n", baz.get(0));
+  printf("%d\n", baz(0));
   
   // With a swizzled vector, it seems weird to permit assignment as in the example below.
-  // bar.get(1) = 3;
-  // printf("%d", bar.get(2)); 
+  // bar(1) = 3;
+  // printf("%d", bar(2)); 
 
   // Just for grins
   yatl::tensor<double, 3, 2> my_matrix(1.2);
-  printf("%f\n", my_matrix.get(1, 1));
+  printf("%f\n", my_matrix(1, 1));
   
   // Scalar types just work, but there's sort of a weird syntax since the dimensionality doesn't matter.
   yatl::tensor<int, 3, 0> scalar(99);
-  printf("%d\n", scalar.get());
+  printf("%d\n", scalar());
   
   yatl::tensor<double, 0, 0> scalar2{2.2};
-  printf("%f\n", scalar2.get());
+  printf("%f\n", scalar2());
   
   // Expressions can be chained arbitrarily, as is done implicitly below.
   yatl::vector<int, 3> another_3vec(9);
   auto result = my_3vec + another_3vec + bar;
   for (int i=0; i<3; ++i) {
-    printf("%d\n", result.get(i));
+    printf("%d\n", result(i));
   }
   
   /*
   // Temporary tensors are a problem, though... leaves a dangling reference.
   // Unsure how to deal with this issue.
   auto bad = my_3vec + yatl::vector<int, 3>(0);
-  printf("%d\n", bad.get(1));
+  printf("%d\n", bad(1));
   */
   
   yatl::vector<int, 3> vec_init_tester{5, 6, 7};
   for (int i=0; i<3; ++i) {
-    printf("%d\n", vec_init_tester.get(i));
+    printf("%d\n", vec_init_tester(i));
   }
   
   yatl::tensor<int, 3, 2> matrix_init_tester{{5, 6, 7},
@@ -239,17 +239,17 @@ int main() {
                                              {3, 4, 1}};
   for (int i=0; i<3; ++i) {
     printf("%d, %d, %d\n",
-           matrix_init_tester.get(0, i),
-           matrix_init_tester.get(1, i),
-           matrix_init_tester.get(2, i));
+           matrix_init_tester(0, i),
+           matrix_init_tester(1, i),
+           matrix_init_tester(2, i));
   }
   
   yatl::tensor<double, 2, 2> matrix_init_tester2{{5.2, 6},
                                                  {7  , 8}};
   for (int i=0; i<2; ++i) {
     printf("%f, %f\n",
-           matrix_init_tester2.get(0, i),
-           matrix_init_tester2.get(1, i));
+           matrix_init_tester2(0, i),
+           matrix_init_tester2(1, i));
   }
   
   yatl::tensor<char, 2, 3>
@@ -302,8 +302,8 @@ int main() {
   
   yatl::vector<int, 3> a = {1, 2, 3};
   matrix<int, 2, 3> rect;
-  rect.get(0) = std::move(a);
-  rect.get(1) = yatl::vector<int, 3>{4, 5, 6};
+  rect(0) = std::move(a);
+  rect(1) = {9, 9, 6};
   for (const auto& row : rect) {
     for (const auto& elm : row) {
       printf("%d, ", elm);
@@ -317,7 +317,7 @@ int main() {
     {5, 6}
   };
   
-  printf("%d, %d\n", rect2.get(0).get(0), rect2.get(0).get(1));
-  printf("%d, %d\n", rect2.get(1).get(0), rect2.get(1).get(1));
-  printf("%d, %d\n", rect2.get(2).get(0), rect2.get(2).get(1));
+  printf("%d, %d\n", rect2(0)(0), rect2(0)(1));
+  printf("%d, %d\n", rect2(1)(0), rect2(1)(1));
+  printf("%d, %d\n", rect2(2)(0), rect2(2)(1));
 }

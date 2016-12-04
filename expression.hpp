@@ -30,8 +30,8 @@ public:
   using value_type = typename get_value_type<base_type>::type;
 
   template <typename... ind_ts>
-  const value_type get(ind_ts&&... inds) const {
-    return m_base->get(inds...);
+  const value_type operator()(ind_ts&&... inds) const {
+    return m_base->operator()(inds...);
   }
 
   // Permits static_casts back to the base type.
