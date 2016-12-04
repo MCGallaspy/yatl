@@ -128,7 +128,9 @@ struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
       for (auto& elm : subseq) {
         constexpr int base = pow(dims, rank - 1);
         const int index = base * i + j;
-        arr[index] = std::move(elm);
+        // Todo: separate this into copy-assign and move-assign cases as below.
+        // arr[index] = elm;
+        arr[index] = std::move(const_cast<value_type&>(elm));
         ++j;
       }
       ++i;
@@ -137,10 +139,24 @@ struct get_coordinate_sequence<nested_init_list<rank, value_type>, dims> {
   }
 };
 
-template <typename value_type, int dims>
-struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
+template <typename value_type_, int dims>
+struct get_coordinate_sequence<nested_init_list<1, value_type_>, dims> {
+private:
+  template <typename value_type>
   static auto
-  generate(std::initializer_list<value_type> list) {
+  generate(std::initializer_list<value_type> list, std::false_type) {
+    std::array<value_type, dims> arr;
+    int i = 0;
+    for (const auto& elm : list) {
+      arr[i] = std::move(const_cast<value_type&>(elm));
+      ++i;
+    }
+    return arr;
+  }
+
+  template <typename value_type>
+  static auto
+  generate(std::initializer_list<value_type> list, std::true_type) {
     std::array<value_type, dims> arr;
     int i = 0;
     for (const auto& elm : list) {
@@ -148,6 +164,12 @@ struct get_coordinate_sequence<nested_init_list<1, value_type>, dims> {
       ++i;
     }
     return arr;
+  }
+
+public:
+  static auto
+  generate(std::initializer_list<value_type_> list) {
+    return generate(list, std::is_copy_assignable<value_type_>{});
   }
 };
 
@@ -536,4 +558,13 @@ int main() {
   for (const auto& col : rect) {
     printf("%d, %d, %d\n", col.get(0), col.get(1), col.get(2));
   }
+
+  cool::vector<cool::vector<int, 2>, 3> rect2 {
+    {1, 2},
+    {3, 4},
+    {5, 6}
+  };
+  for (const auto& col : rect2) {
+    printf("%d, %d\n", col.get(0), col.get(1));
+  }  
 }
