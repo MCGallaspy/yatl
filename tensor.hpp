@@ -178,6 +178,20 @@ public:
     return m_coords.end();
   }
 };
-	
+
+//***********************
+// Helper specializations
+//***********************
+
+template <typename value_type, int dims, int rank>
+struct get_dims<tensor<value_type, dims, rank>> {
+  static constexpr int value = dims;
+};
+
+template <typename value_type, int dims, int rank>
+struct get_value_type<tensor<value_type, dims, rank>> {
+  using type = value_type;
+};
+
 } // namespace yatl
 #endif // TENSOR_HPP

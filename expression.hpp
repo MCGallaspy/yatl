@@ -39,6 +39,20 @@ public:
     return *m_base;
   }
 };
-	
+
+//***********************
+// Helper specializations
+//***********************
+
+template <typename inner>
+struct get_dims<expression<inner>> {
+  static constexpr int value = get_dims<inner>::value;
+};
+
+template <typename inner>
+struct get_value_type<expression<inner>> {
+  using type = typename get_value_type<inner>::type;
+};
+
 } // namespace yatl
 #endif // EXPRESSION_HPP

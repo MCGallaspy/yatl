@@ -48,19 +48,6 @@ There are three (and a half) ideas to consider here:
 
 namespace yatl {
 
-template <typename>
-struct get_dims;
-
-template <typename inner>
-struct get_dims<expression<inner>> {
-  static constexpr int value = get_dims<inner>::value;
-};
-
-template <typename value_type, int dims, int rank>
-struct get_dims<tensor<value_type, dims, rank>> {
-  static constexpr int value = dims;
-};
-
 // Only (conceptually) defined for vectors. I'm not sure how swizzling would generalize to higher rank tensors.
 template <typename expr_type>
 class swizzled : public expression<swizzled<expr_type>> {
@@ -183,21 +170,9 @@ public:
 };
 
 // ...
-template <typename inner>
-struct get_value_type<expression<inner>> {
-  using type = typename get_value_type<inner>::type;
-};
-
-// ...
 template <typename expr_type>
 struct get_value_type<swizzled<expr_type>> {
   using type = typename expr_type::value_type;
-};
-
-// ... and we're done.
-template <typename value_type_, int dims, int rank>
-struct get_value_type<tensor<value_type_, dims, rank>> {
-  using type = value_type_;  
 };
 
 } // namespace yatl
