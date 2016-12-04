@@ -46,7 +46,9 @@ There are three (and a half) ideas to consider here:
 
 #include <stdio.h>
 
-namespace cool {
+#include "expression.hpp"
+
+namespace yatl {
 
 // This anonymous namespace just has some utilities I use.
 namespace {
@@ -184,40 +186,9 @@ struct get_coordinate_sequence<nested_init_list<0, value_type>, dims> {
 
 } // anonymous inner namespace
 
-
-// A little helper that we'll make specializations for below for each expression type.
-// Cuts down on some visual clutter in the definitions.
-template <typename>
-struct get_value_type;
-
 // same
 template <typename>
 struct get_dims;
-
-// An expression wraps non-copyable objects (for us, tensors) to give us cheap copy semantics.
-// However we must be careful to avoid keeping around "naked" expressions containing temporaries --
-// it will result in a dangling reference.
-// In general this means that we should *avoid* using "naked" expressions as template parameters except where they
-// are necessary (more on that below) and instead cast expressions to their base_type for use as template params. 
-template <typename base_type>
-class expression {
-private:
-  const base_type* m_base;
-  
-public:
-  expression() : m_base(static_cast<const base_type*>(this)) {}
-  
-  using value_type = typename get_value_type<base_type>::type;
-  
-  template <typename... ind_ts>
-  const value_type get(ind_ts&&... inds) const {
-    return m_base->get(inds...);
-  }
-  
-  operator const base_type& () const {
-    return *m_base;
-  }
-};
 
 // value_type_ : int, double, etc. Should support arithmetic.
 // dims        : the dimensionality, e.g. 3 for normal Euclidean space
@@ -265,11 +236,11 @@ public:
     return m_coords[index];
   }
   
-  auto begin() {
+  auto begin() const {
     return m_coords.begin();
   }
   
-  auto end() {
+  auto end() const {
     return m_coords.end();
   }
   
@@ -428,12 +399,14 @@ struct get_value_type<tensor<value_type_, dims, rank>> {
   using type = value_type_;  
 };
 
-} // namespace cool
+} // namespace yatl
 
+template <typename value_type, int rows, int cols>
+using matrix = yatl::vector<yatl::vector<value_type, cols>, rows>;
 
 int main() {
   // The basics
-  cool::vector<int> my_3vec(42);
+  yatl::vector<int> my_3vec(42);
   printf("%d\n", my_3vec.get(0));
   
   my_3vec.get(1) = 7;
@@ -444,11 +417,11 @@ int main() {
   
   // Maps index 2 into 1.
   std::array<std::pair<int, int>, 1> pairs{ std::make_pair(2, 1) };
-  auto bar = cool::make_swizzled(my_3vec, pairs);
+  auto bar = yatl::make_swizzled(my_3vec, pairs);
   printf("%d\n", bar.get(2));
   
   // And you can swizzle swizzled stuff.
-  auto baz = cool::make_swizzled(bar, pairs);
+  auto baz = yatl::make_swizzled(bar, pairs);
   printf("%d\n", baz.get(0));
   
   // With a swizzled vector, it seems weird to permit assignment as in the example below.
@@ -456,18 +429,18 @@ int main() {
   // printf("%d", bar.get(2)); 
 
   // Just for grins
-  cool::tensor<double, 3, 2> my_matrix(1.2);
+  yatl::tensor<double, 3, 2> my_matrix(1.2);
   printf("%f\n", my_matrix.get(1, 1));
   
   // Scalar types just work, but there's sort of a weird syntax since the dimensionality doesn't matter.
-  cool::tensor<int, 3, 0> scalar(99);
+  yatl::tensor<int, 3, 0> scalar(99);
   printf("%d\n", scalar.get());
   
-  cool::tensor<double, 0, 0> scalar2{2.2};
+  yatl::tensor<double, 0, 0> scalar2{2.2};
   printf("%f\n", scalar2.get());
   
   // Expressions can be chained arbitrarily, as is done implicitly below.
-  cool::vector<int, 3> another_3vec(9);
+  yatl::vector<int, 3> another_3vec(9);
   auto result = my_3vec + another_3vec + bar;
   for (int i=0; i<3; ++i) {
     printf("%d\n", result.get(i));
@@ -476,16 +449,16 @@ int main() {
   /*
   // Temporary tensors are a problem, though... leaves a dangling reference.
   // Unsure how to deal with this issue.
-  auto bad = my_3vec + cool::vector<int, 3>(0);
+  auto bad = my_3vec + yatl::vector<int, 3>(0);
   printf("%d\n", bad.get(1));
   */
   
-  cool::vector<int, 3> vec_init_tester{5, 6, 7};
+  yatl::vector<int, 3> vec_init_tester{5, 6, 7};
   for (int i=0; i<3; ++i) {
     printf("%d\n", vec_init_tester.get(i));
   }
   
-  cool::tensor<int, 3, 2> matrix_init_tester{{5, 6, 7},
+  yatl::tensor<int, 3, 2> matrix_init_tester{{5, 6, 7},
                                              {7, 8, 9},
                                              {3, 4, 1}};
   for (int i=0; i<3; ++i) {
@@ -495,7 +468,7 @@ int main() {
            matrix_init_tester.get(2, i));
   }
   
-  cool::tensor<double, 2, 2> matrix_init_tester2{{5.2, 6},
+  yatl::tensor<double, 2, 2> matrix_init_tester2{{5.2, 6},
                                                  {7  , 8}};
   for (int i=0; i<2; ++i) {
     printf("%f, %f\n",
@@ -503,7 +476,7 @@ int main() {
            matrix_init_tester2.get(1, i));
   }
   
-  cool::tensor<char, 2, 3>
+  yatl::tensor<char, 2, 3>
     rank3_char_tensor
     {
       {
@@ -521,7 +494,7 @@ int main() {
   }
   printf("\n");
   
-  cool::tensor<int, 2, 4>
+  yatl::tensor<int, 2, 4>
     rank4_int_tensor
     {
       {
@@ -551,20 +524,24 @@ int main() {
   }
   printf("\n");
   
-  cool::vector<int, 3> a = {1, 2, 3};
-  cool::vector<cool::vector<int, 3>, 2> rect;
+  yatl::vector<int, 3> a = {1, 2, 3};
+  matrix<int, 2, 3> rect;
   rect.get(0) = std::move(a);
-  rect.get(1) = cool::vector<int, 3>{4, 5, 6};
-  for (const auto& col : rect) {
-    printf("%d, %d, %d\n", col.get(0), col.get(1), col.get(2));
+  rect.get(1) = yatl::vector<int, 3>{4, 5, 6};
+  for (const auto& row : rect) {
+    for (const auto& elm : row) {
+      printf("%d, ", elm);
+    }
+    printf("\n");
   }
 
-  cool::vector<cool::vector<int, 2>, 3> rect2 {
+  matrix<int, 3, 2> rect2 {
     {1, 2},
     {3, 4},
     {5, 6}
   };
-  for (const auto& col : rect2) {
-    printf("%d, %d\n", col.get(0), col.get(1));
-  }  
+  
+  printf("%d, %d\n", rect2.get(0).get(0), rect2.get(0).get(1));
+  printf("%d, %d\n", rect2.get(1).get(0), rect2.get(1).get(1));
+  printf("%d, %d\n", rect2.get(2).get(0), rect2.get(2).get(1));
 }
